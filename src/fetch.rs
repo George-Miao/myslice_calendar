@@ -1,7 +1,10 @@
 use std::{env, str::FromStr};
 
 use attohttpc::get;
-use color_eyre::{eyre::ContextCompat, Result};
+use color_eyre::{
+    eyre::{Context, ContextCompat},
+    Result,
+};
 use scraper::Html;
 
 use crate::{selector, Class, Course, CourseMeta, GetText, Hygiene};
@@ -10,8 +13,8 @@ pub const URL: &str =
     "https://cs92prod.ps.syr.edu/psc/CS92PROD/EMPLOYEE/SA/c/SA_LEARNER_SERVICES.SSR_SSENRL_LIST";
 
 pub fn request_html() -> Result<String> {
-    let session_id = env::var("SESSION_ID")?;
-    let token = env::var("TOKEN")?;
+    let session_id = env::var("SESSION_ID").wrap_err("Not found SESSION_ID in env")?;
+    let token = env::var("TOKEN").wrap_err("Not found TOKEN in env")?;
     let cookie = format!("ITS-CSPRD101-80-PORTAL-PSJSESSIONID={session_id};PS_TOKEN={token}");
     let res = get(URL)
         .header("Cookie", cookie)
