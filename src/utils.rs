@@ -1,0 +1,112 @@
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+use chrono_tz::Tz;
+use color_eyre::{eyre::Context, Result};
+use icalendar::Event;
+use scraper::element_ref::Select;
+
+use crate::Course;
+
+pub trait Hygiene {
+    #[must_use]
+    fn hygiene(self) -> Self;
+}
+
+impl<'a> Hygiene for Option<&'a str> {
+    fn hygiene(self) -> Self {
+        match self {
+            Some("\u{a0}") => None,
+            rest => rest,
+        }
+    }
+}
+
+pub trait GetText<'a>: Sized {
+    fn into_text(self) -> Option<&'a str>;
+    fn get_text(&'a mut self) -> Option<&'a str>;
+}
+
+impl<'a, 'b> GetText<'a> for Select<'a, 'b> {
+    fn get_text(&'a mut self) -> Option<&'a str> {
+        self.next().and_then(|x| x.text().next())
+    }
+
+    fn into_text(mut self) -> Option<&'a str> {
+        self.next().and_then(|x| x.text().next())
+    }
+}
+
+pub trait Generate {
+    fn generate(&self) -> Vec<Event>;
+}
+
+impl Generate for &[Course] {
+    fn generate(&self) -> Vec<Event> {
+        self.iter()
+            .flat_map(|course| {
+                course
+                    .classes
+                    .iter()
+                    .map(move |class| class.as_events(&course.meta))
+            })
+            .flatten()
+            .collect()
+    }
+}
+
+pub fn parse_date(date: &str) -> Result<NaiveDate> {
+    let parts = date
+        .split('/')
+        .map(|x| -> Result<u32> { x.parse().wrap_err("Failed to parse number") })
+        .collect::<Result<Vec<_>>>()?;
+    let date = NaiveDate::from_ymd(parts[2] as i32, parts[0], parts[1]);
+    Ok(date)
+}
+
+pub fn parse_time(date: &str) -> Result<NaiveTime> {
+    let date = NaiveTime::parse_from_str(date, "%l:%M%p")?;
+    Ok(date)
+}
+
+pub fn format_weekday(days: &str) -> String {
+    days.to_uppercase()
+        .chars()
+        .enumerate()
+        .flat_map(|(i, c)| {
+            if i != 0 && i % 2 == 0 {
+                Some(',')
+            } else {
+                None
+            }
+            .into_iter()
+            .chain(std::iter::once(c))
+        })
+        .collect()
+}
+
+pub fn format_ny_time(datetime: &NaiveDateTime) -> String {
+    let tz = chrono_tz::Tz::America__New_York;
+    chrono::Utc
+        .from_local_datetime(&tz.from_local_datetime(datetime).unwrap().naive_local())
+        .unwrap()
+        .format("%Y%m%dT%H%M%SZ")
+        .to_string()
+}
+
+pub fn convert_time(date: &NaiveDate, time: NaiveTime) -> DateTime<Utc> {
+    let start = Tz::America__New_York
+        .from_local_datetime(&date.and_time(time))
+        .unwrap();
+    Utc.from_local_datetime(&start.naive_utc()).unwrap()
+}
+
+#[test]
+fn test_parse_date() {
+    println!("{:#?}", parse_date("05/03/2022"));
+    println!("{:#?}", parse_time("2:00PM"));
+}
+
+#[test]
+fn test_parse_weekday() {
+    assert_eq!(format_weekday("MoWeFr"), "MO,WE,FR");
+    assert_eq!(format_weekday("Su"), "SU");
+}
