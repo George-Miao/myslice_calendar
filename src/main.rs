@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path::Path};
 
 use color_eyre::{
     eyre::{bail, Context},
@@ -14,9 +14,13 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     dotenv::dotenv()?;
 
-    fs::create_dir("data").wrap_err("Unable to create dir `data`")?;
+    if !Path::new("data").exists() {
+        fs::create_dir("data").wrap_err("Unable to create dir `data`")?;
+    }
 
+    println!("Fetching data");
     let text = request_html()?;
+    println!("Done fetching, generating");
     fs::write("data/result.html", &text)?;
 
     // let text = fs::read_to_string("data/result.html")?;
@@ -28,6 +32,9 @@ fn main() -> Result<()> {
     let res = parse_html(&text)?;
 
     let events = res.as_slice().generate();
+    let num = events.len();
+
+    println!("{} events found", num);
 
     let mut calendar = Calendar::new();
     calendar.extend(events);
@@ -36,6 +43,7 @@ fn main() -> Result<()> {
     fs::write("data/generated.ics", res)
         .wrap_err("Unable to write result to `data/generated.ics`")?;
 
+    println!("Done generating, data stored in `./data/generated.ics`");
     Ok(())
 }
 
