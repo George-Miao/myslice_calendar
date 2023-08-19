@@ -1,10 +1,12 @@
-use std::{convert::Infallible, ops::Range, str::FromStr};
+use std::{convert::Infallible, fmt::Write, ops::Range, str::FromStr};
 
 use chrono::{NaiveDate, NaiveTime};
-use color_eyre::{eyre::bail, Result};
+use color_eyre::Result;
+use ical::EventLike;
 use icalendar::{self as ical, Component, Event, EventStatus};
+use tap::Pipe;
 
-use crate::{convert_time, format_ny_time, format_weekday, parse_date, parse_time};
+use crate::{convert_time_in_ny, format_ny_time, format_weekday, parse_date, parse_time};
 
 #[derive(Debug, Clone)]
 
@@ -22,6 +24,7 @@ impl Status {
 
 impl FromStr for Status {
     type Err = Infallible;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "Enrolled" => Ok(Status::Enrolled),
@@ -42,6 +45,7 @@ pub enum Mode {
 
 impl FromStr for Mode {
     type Err = Infallible;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "P" => Ok(Mode::InPerson),
@@ -58,33 +62,38 @@ pub enum Schedule {
         days: String,
         time: Range<NaiveTime>,
     },
-    Others(String),
     Tba,
 }
 
 impl FromStr for Schedule {
     type Err = color_eyre::Report;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         macro_rules! some {
             ($expr:expr, $str:expr) => {
                 match $expr {
                     Some(x) => x,
-                    None => return Ok(Self::Others($str)),
+                    None => {
+                        return Err(::color_eyre::eyre::eyre!(
+                            "Failed to parse schedule: {}",
+                            $str
+                        ))
+                    }
                 }
             };
         }
         match s {
             "TBA" => Ok(Self::Tba),
             s => {
-                let (days, time) = some!(s.split_once(' '), s.to_owned());
+                let (days, time) = some!(s.split_once(' '), s);
 
-                let (start, end) = some!(time.split_once(" - "), s.to_owned());
+                let (start, end) = some!(time.split_once('-'), s);
 
                 Ok(Self::Determined {
-                    days: days.to_owned(),
+                    days: days.trim().to_owned(),
                     time: Range {
-                        start: parse_time(start)?,
-                        end: parse_time(end)?,
+                        start: parse_time(start.trim())?,
+                        end: parse_time(end.trim())?,
                     },
                 })
             }
@@ -101,10 +110,11 @@ pub struct Dates {
 
 impl FromStr for Dates {
     type Err = color_eyre::Report;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (start, end) = match s.split_once(" - ") {
-            Some((a, b)) => (a, b),
-            None => return Err(color_eyre::eyre::eyre!("Bad format")),
+        let (start, end) = match s.trim().split_once('-') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => return Err(color_eyre::eyre::eyre!("Bad dates format ({s})")),
         };
         Ok(Self {
             start: parse_date(start)?,
@@ -148,21 +158,21 @@ pub struct Class {
 }
 
 impl Class {
-    pub fn as_events(&self, meta: &CourseMeta) -> Option<Event> {
-        let rrule = self.as_rrule().ok()?;
+    pub fn as_event(&self, meta: &CourseMeta) -> Result<Option<Event>> {
+        let rrule = self.as_rrule()?;
 
         let CourseMeta {
             subject,
             code,
             title,
             class_num,
-            status,
+            
             ..
         } = meta;
 
-        if !status.is_enrolled() {
-            return None;
-        }
+        // if !status.is_enrolled() {
+        //     return None;
+        // }
 
         let Dates {
             start: start_date, ..
@@ -170,7 +180,7 @@ impl Class {
 
         let (start_time, end_time) = match &self.schedule {
             Schedule::Determined { time, .. } => (time.start, time.end),
-            _ => unreachable!("Class#as_rrule should already tested this"),
+            _ => return Ok(None),
         };
 
         let mut summary = format!("{} {}", subject, code);
@@ -188,26 +198,32 @@ impl Class {
             .status(EventStatus::Confirmed)
             .class(ical::Class::Public)
             .summary(&summary)
-            .starts(convert_time(start_date, start_time))
-            .ends(convert_time(start_date, end_time))
+            .starts(convert_time_in_ny(start_date, start_time))
+            .ends(convert_time_in_ny(start_date, end_time))
             .location(&self.location)
             .description(&description)
-            .add_property("RRULE", &rrule)
+            .pipe(|x| {
+                if let Some(rrule) = rrule {
+                    x.add_property("RRULE", &rrule)
+                } else {
+                    x
+                }
+            })
             .done();
 
-        Some(event)
+        event.pipe(Some).pipe(Ok)
     }
 
     /// RRULE looks like:
     /// ```
     /// RRULE:FREQ=WEEKLY;UNTIL=20220505T035959Z;INTERVAL=1;BYDAY=MO,WE,FR
     /// ```
-    pub fn as_rrule(&self) -> Result<String> {
+    pub fn as_rrule(&self) -> Result<Option<String>> {
         let mut ret = String::with_capacity(15);
 
         let days = match &self.schedule {
             Schedule::Determined { days, .. } => days,
-            _ => bail!("Datetime this course is not determined"),
+            _ => return Ok(None),
         };
 
         ret.push_str("FREQ=WEEKLY;INTERVAL=1;");
@@ -216,9 +232,9 @@ impl Class {
             end: ref end_date, ..
         } = self.dates;
 
-        let until = format_ny_time(&end_date.and_hms(23, 59, 59));
+        let until = format_ny_time(&end_date.and_hms_opt(23, 59, 59).unwrap());
 
-        ret.push_str(&format!("UNTIL={};BYDAY={}", until, format_weekday(days)));
-        Ok(ret)
+        write!(ret, "UNTIL={};BYDAY={}", until, format_weekday(days))?;
+        ret.pipe(Some).pipe(Ok)
     }
 }

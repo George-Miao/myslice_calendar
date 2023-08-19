@@ -1,14 +1,16 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::{
-    eyre::{bail, Context},
+    eyre::{bail, Context, ContextCompat},
     Result,
 };
 use icalendar::Calendar;
+use tap::Pipe;
 
 mod_use::mod_use![data, utils, fetch];
-
-// const BAD_TOKEN_MSG: &str = "UnAuthorized Token has been detected by the System.";
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -18,29 +20,23 @@ fn main() -> Result<()> {
         fs::create_dir("data").wrap_err("Unable to create dir `data`")?;
     }
 
-    // println!("Fetching data");
-    // let text = request_html()?;
-    // println!("Done fetching, generating");
-    // fs::write("data/result.html", &text)?;
-
-    let filename = env::var("FILE_NAME").wrap_err("FILE_NAME is not set")?;
-
-    let path = Path::new("./data/").join(&filename);
+    let path = env::args()
+        .nth(1)
+        .wrap_err("Please provide a filename as argument")?
+        .pipe(PathBuf::from);
 
     if !path.exists() {
-        bail!("File `{}` does not exist", filename);
+        bail!("File `{}` does not exist", path.display());
     } else {
         println!("Parsing file: {}", path.display());
     }
 
-    let text = fs::read_to_string(path)?;
-    // if text.contains(BAD_TOKEN_MSG) {
-    //     bail!("Bad token or session_id")
-    // };
+    let res = fs::read_to_string(&path)?.pipe_as_ref(parse_html)?;
 
-    let res = parse_html(&text)?;
+    println!("{res:#?}");
+    println!("HTML parsed, generate ICS");
 
-    let events = res.as_slice().generate();
+    let events = generate(res.iter())?;
     let num = events.len();
 
     println!("{} events found", num);
@@ -49,19 +45,18 @@ fn main() -> Result<()> {
     calendar.extend(events);
     let res = calendar.to_string();
 
-    fs::write("data/generated.ics", res)
-        .wrap_err("Unable to write result to `data/generated.ics`")?;
+    fs::write(path.with_extension("ics"), res).wrap_err("Unable to write result to file")?;
 
-    println!("Done generating, data stored in `./data/generated.ics`");
+    println!(
+        "Done generating, data stored in `./data/${}`",
+        path.display()
+    );
     Ok(())
 }
 
-#[macro_export]
 macro_rules! selector {
-    (id = $id:literal) => {{
-        ::scraper::Selector::parse(concat!("[id*=", $id, "]")).unwrap()
-    }};
-    ($raw:literal) => {{
-        ::scraper::Selector::parse($raw).unwrap()
-    }};
+    (id = $id:literal) => {{ ::scraper::Selector::parse(concat!("[id ^= ", $id, "]")).unwrap() }};
+    ($raw:literal) => {{ ::scraper::Selector::parse($raw).unwrap() }};
 }
+
+pub(crate) use selector;

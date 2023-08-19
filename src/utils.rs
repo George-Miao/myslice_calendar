@@ -1,7 +1,7 @@
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
-use chrono_tz::Tz;
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+
 use color_eyre::{eyre::Context, Result};
-use icalendar::Event;
+use icalendar::{CalendarDateTime, Event};
 use scraper::element_ref::Select;
 
 use crate::Course;
@@ -15,7 +15,7 @@ impl<'a> Hygiene for Option<&'a str> {
     fn hygiene(self) -> Self {
         match self {
             Some("\u{a0}") => None,
-            rest => rest,
+            rest => rest.map(str::trim),
         }
     }
 }
@@ -35,22 +35,16 @@ impl<'a, 'b> GetText<'a> for Select<'a, 'b> {
     }
 }
 
-pub trait Generate {
-    fn generate(&self) -> Vec<Event>;
-}
-
-impl Generate for &[Course] {
-    fn generate(&self) -> Vec<Event> {
-        self.iter()
-            .flat_map(|course| {
-                course
-                    .classes
-                    .iter()
-                    .map(move |class| class.as_events(&course.meta))
-            })
-            .flatten()
-            .collect()
-    }
+pub fn generate<'a>(iter: impl IntoIterator<Item = &'a Course>) -> Result<Vec<Event>> {
+    iter.into_iter()
+        .flat_map(|course| {
+            course
+                .classes
+                .iter()
+                .map(|class| class.as_event(&course.meta))
+        })
+        .filter_map(Result::transpose)
+        .collect()
 }
 
 pub fn parse_date(date: &str) -> Result<NaiveDate> {
@@ -58,7 +52,8 @@ pub fn parse_date(date: &str) -> Result<NaiveDate> {
         .split('/')
         .map(|x| -> Result<u32> { x.parse().wrap_err("Failed to parse number") })
         .collect::<Result<Vec<_>>>()?;
-    let date = NaiveDate::from_ymd(parts[2] as i32, parts[0], parts[1]);
+    let date = NaiveDate::from_ymd_opt(parts[2] as i32, parts[0], parts[1])
+        .ok_or_else(|| color_eyre::eyre::eyre!("Failed to convert date"))?;
     Ok(date)
 }
 
@@ -92,11 +87,11 @@ pub fn format_ny_time(datetime: &NaiveDateTime) -> String {
         .to_string()
 }
 
-pub fn convert_time(date: &NaiveDate, time: NaiveTime) -> DateTime<Utc> {
-    let start = Tz::America__New_York
-        .from_local_datetime(&date.and_time(time))
-        .unwrap();
-    Utc.from_local_datetime(&start.naive_utc()).unwrap()
+pub fn convert_time_in_ny(date: &NaiveDate, time: NaiveTime) -> CalendarDateTime {
+    CalendarDateTime::WithTimezone {
+        date_time: date.and_time(time),
+        tzid: "America/New_York".into(),
+    }
 }
 
 #[test]

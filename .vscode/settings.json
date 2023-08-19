@@ -1,3 +1,21 @@
 {
-  "cSpell.words": ["BYDAY", "Frequenzy", "rrules", "wkst"]
+  "cSpell.words": [
+    "BYDAY",
+    "Frequenzy",
+    "rrules",
+    "wkst"
+  ],
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    "**/.classpath": true,
+    "**/.project": true,
+    "**/.settings": true,
+    "**/.factorypath": true
+  },
+  "hide-files.files": []
 }

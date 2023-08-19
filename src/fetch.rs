@@ -24,11 +24,20 @@ pub fn request_html() -> Result<String> {
 }
 
 fn parse_title(title: &str) -> Result<(String, u32, String)> {
-    let (subj_code, title) = title.split_once(" - ").wrap_err("Bad title format")?;
+    let (subj_code, title) = title
+        .trim()
+        .split_once(" - ")
+        .wrap_err("Bad title format")?;
+
     let (subj, code) = subj_code
+        .trim()
         .split_once(' ')
         .wrap_err("Bad subject & code format")?;
-    Ok((subj.into(), code.parse()?, title.into()))
+    Ok((
+        subj.into(),
+        code.parse().wrap_err("Bad class code")?,
+        title.into(),
+    ))
 }
 
 pub fn parse_html(text: &str) -> Result<Vec<Course>> {
@@ -57,62 +66,66 @@ pub fn parse_html(text: &str) -> Result<Vec<Course>> {
                 code,
                 class_num: 0,
             };
-            let mut classes = vec![];
+            let classes = table
+                .select(&class_sel)
+                .map(|class| -> Result<Class> {
+                    meta.add_class_num();
 
-            for class in table.select(&class_sel) {
-                meta.add_class_num();
+                    let number = class
+                        .select(&class_nbr_sel)
+                        .into_text()
+                        .hygiene()
+                        // .tap(|x| println!("{:?}", x))
+                        .map(|x| x.parse().unwrap());
 
-                let number = class
-                    .select(&class_nbr_sel)
-                    .into_text()
-                    .hygiene()
-                    .map(|x| x.parse().unwrap());
+                    let section = class
+                        .select(&section_sel)
+                        .into_text()
+                        .hygiene()
+                        .map(ToOwned::to_owned);
 
-                let section = class
-                    .select(&section_sel)
-                    .into_text()
-                    .hygiene()
-                    .map(ToOwned::to_owned);
+                    let instructor = class
+                        .select(&instructor_sel)
+                        .into_text()
+                        .wrap_err("Failed to find instructor")?
+                        .to_owned();
 
-                let schedule = class
-                    .select(&schedule_sel)
-                    .into_text()
-                    .wrap_err("Failed to find schedule")?;
+                    let location = class
+                        .select(&location_sel)
+                        .into_text()
+                        .hygiene()
+                        .wrap_err("Failed to find location")?
+                        .to_owned();
 
-                let location = class
-                    .select(&location_sel)
-                    .into_text()
-                    .wrap_err("Failed to find location")?
-                    .to_owned();
+                    let schedule = class
+                        .select(&schedule_sel)
+                        .into_text()
+                        .wrap_err("Failed to find schedule")
+                        .and_then(|s| FromStr::from_str(s).map_err(Into::into))?;
 
-                let mode = class
-                    .select(&mode_sel)
-                    .into_text()
-                    .wrap_err("Failed to find mode")?;
+                    let mode = class
+                        .select(&mode_sel)
+                        .into_text()
+                        .wrap_err("Failed to find mode")
+                        .and_then(|s| FromStr::from_str(s).map_err(Into::into))?;
 
-                let instructor = class
-                    .select(&instructor_sel)
-                    .into_text()
-                    .wrap_err("Failed to find instructor")?
-                    .to_owned();
+                    let dates = class
+                        .select(&dates_sel)
+                        .into_text()
+                        .wrap_err("Failed to find dates")
+                        .and_then(|s| FromStr::from_str(s).map_err(Into::into))?;
 
-                let dates = class
-                    .select(&dates_sel)
-                    .into_text()
-                    .wrap_err("Failed to find dates")?;
-
-                let class = Class {
-                    number,
-                    section,
-                    location,
-                    instructor,
-                    mode: FromStr::from_str(mode)?,
-                    dates: FromStr::from_str(dates)?,
-                    schedule: FromStr::from_str(schedule)?,
-                };
-
-                classes.push(class);
-            }
+                    Ok(Class {
+                        mode,
+                        dates,
+                        number,
+                        section,
+                        location,
+                        schedule,
+                        instructor,
+                    })
+                })
+                .collect::<Result<_>>()?;
 
             Ok(Course { meta, classes })
         })

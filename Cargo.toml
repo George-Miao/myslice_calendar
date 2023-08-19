@@ -1,16 +1,17 @@
 [package]
-name = "myslice_calendar"
+name    = "myslice_calendar"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-color-eyre = { version = "0.6.0", default-features = false }
-attohttpc = "0.18.0"
-chrono = "0.4.19"
-chrono-tz = "0.5.3"
-dotenv = "0.15.0"
-icalendar = "0.10.0"
-mod_use = "0.2.0"
-scraper = "0.12.0"
+color-eyre = { version = "0.6.2", default-features = false }
+attohttpc  = "0.24.0"
+chrono     = "0.4.23"
+chrono-tz = "0.8.1"
+dotenv     = "0.15.0"
+icalendar  = "0.15.1"
+mod_use    = "0.2.1"
+scraper    = "0.14.0"
+tap = "1.0.1"
